@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const yaml = require('js-yaml');
 
@@ -25,6 +25,51 @@ app.get('/openapi.yaml', (req, res) => {
 
 app.get('/openapi.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'openapi.json'));
+});
+
+let nextGot = false;
+let nextInfo = '';
+
+async function readFilesInFolder(folderPath) {
+  const fileNames = await fs.readdir(folderPath);
+  let content = '';
+
+  for (const fileName of fileNames) {
+    const filePath = path.join(folderPath, fileName);
+    const fileStat = await fs.stat(filePath);
+
+    if (fileStat.isDirectory()) {
+      content += await readFilesInFolder(filePath);
+    } else if (path.extname(fileName) === '.md') {
+      content += await fs.readFile(filePath, 'utf-8');
+      content += '\n';
+    }
+  }
+
+  return content;
+}
+
+async function getDocs() {
+  const docsFolderPath = path.join(__dirname, 'docs');
+  const combinedContent = await readFilesInFolder(docsFolderPath);
+  return combinedContent;
+}
+
+app.use(async (req, res, next) => {
+  if (req.method === 'POST' && req.body && req.body.message) {
+    const message = req.body.message;
+    if (shouldTriggerGetDocs(message)) {
+      if (!nextGot) {
+        nextInfo = await getDocs(); // Call the getDocs function and store the response in nextInfo
+        nextGot = true;
+      }
+      res.json(nextInfo); // Send the stored response to the client
+    } else {
+      next();
+    }
+  } else {
+    next();
+  }
 });
 
 app.all('/:path', async (req, res) => {
@@ -54,3 +99,8 @@ app.all('/:path', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Proxy server listening on port ${PORT}`);
 });
+
+function shouldTriggerGetDocs(userMessage) {
+  const lowerCaseMessage = userMessage.toLowerCase();
+  return lowerCaseMessage.includes('next.js') || lowerCaseMessage.includes('next js') || lowerCaseMessage.includes('react next') || lowerCaseMessage.includes('next react');
+}
