@@ -1,9 +1,11 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+
+let nextGot = false;
+let nextInfo = '';
 
 const app = express();
 const PORT = 3333;
@@ -11,8 +13,6 @@ const PORT = 3333;
 // Note: Setting CORS to allow chat.openapi.com is required for ChatGPT to access your plugin
 app.use(cors({ origin: [`http://localhost:${PORT}`, 'https://chat.openai.com'] }));
 app.use(express.json());
-
-const api_url = 'https://example.com';
 
 app.get('/.well-known/ai-plugin.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'ai-plugin.json'));
@@ -27,33 +27,30 @@ app.get('/openapi.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'openapi.json'));
 });
 
-let nextGot = false;
-let nextInfo = '';
+const DOCS_DIR = path.join(__dirname, 'docs');
 
-async function readFilesInFolder(folderPath) {
-  const fileNames = await fs.readdir(folderPath);
-  let content = '';
+async function getDocs() {
+  let combinedContent = '';
 
-  for (const fileName of fileNames) {
-    const filePath = path.join(folderPath, fileName);
-    const fileStat = await fs.stat(filePath);
+  async function processDirectory(dir) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-    if (fileStat.isDirectory()) {
-      content += await readFilesInFolder(filePath);
-    } else if (path.extname(fileName) === '.md') {
-      content += await fs.readFile(filePath, 'utf-8');
-      content += '\n';
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await processDirectory(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        const fileContent = fs.readFileSync(entryPath, 'utf-8');
+        combinedContent += fileContent + '\n';
+      }
     }
   }
 
-  return content;
-}
+  await processDirectory(DOCS_DIR);
 
-async function getDocs() {
-  const docsFolderPath = path.join(__dirname, 'docs');
-  const combinedContent = await readFilesInFolder(docsFolderPath);
   return combinedContent;
 }
+
 
 app.use(async (req, res, next) => {
   if (req.method === 'POST' && req.body && req.body.message) {
@@ -69,30 +66,6 @@ app.use(async (req, res, next) => {
     }
   } else {
     next();
-  }
-});
-
-app.all('/:path', async (req, res) => {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-
-  const url = `${api_url}/${req.params.path}`;
-  console.log(`Forwarding call: ${req.method} ${req.params.path} -> ${url}`);
-
-  try {
-    const response = await axios({
-      method: req.method,
-      url,
-      headers,
-      params: req.query,
-      data: req.body,
-    });
-
-    res.send(response.data);
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: 'An error occurred while forwarding the request.' });
   }
 });
 
