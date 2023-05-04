@@ -1,0 +1,29 @@
+openapi: 3.0.1
+info:
+  title: NextGPT
+  description: A plugin that allows lets chatGPT reference current next.js documentation.
+  version: 'v1'
+servers:
+  - url: http://localhost:3333
+paths:
+  /getDocs:
+    get:
+      operationId: getDocs
+      summary: Get the documentation for next
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/getDocsResponse'
+components:
+  schemas:
+    getDocsResponse:
+      type: object
+      properties:
+        todos:
+          type: array
+          items:
+            type: string
+          description: The documentation.
