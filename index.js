@@ -1,9 +1,11 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+
+let nextGot = false;
+let nextInfo = '';
 
 const app = express();
 const PORT = 3333;
@@ -11,8 +13,6 @@ const PORT = 3333;
 // Note: Setting CORS to allow chat.openapi.com is required for ChatGPT to access your plugin
 app.use(cors({ origin: [`http://localhost:${PORT}`, 'https://chat.openai.com'] }));
 app.use(express.json());
-
-const api_url = 'https://example.com';
 
 app.get('/.well-known/ai-plugin.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'ai-plugin.json'));
@@ -27,30 +27,53 @@ app.get('/openapi.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'openapi.json'));
 });
 
-app.all('/:path', async (req, res) => {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
+const DOCS_DIR = path.join(__dirname, 'docs');
 
-  const url = `${api_url}/${req.params.path}`;
-  console.log(`Forwarding call: ${req.method} ${req.params.path} -> ${url}`);
+async function getDocs() {
+  let combinedContent = '';
 
-  try {
-    const response = await axios({
-      method: req.method,
-      url,
-      headers,
-      params: req.query,
-      data: req.body,
-    });
+  async function processDirectory(dir) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
 
-    res.send(response.data);
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: 'An error occurred while forwarding the request.' });
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await processDirectory(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        const fileContent = fs.readFileSync(entryPath, 'utf-8');
+        combinedContent += fileContent + '\n';
+      }
+    }
+  }
+
+  await processDirectory(DOCS_DIR);
+
+  return combinedContent;
+}
+
+
+app.use(async (req, res, next) => {
+  if (req.method === 'POST' && req.body && req.body.message) {
+    const message = req.body.message;
+    if (shouldTriggerGetDocs(message)) {
+      if (!nextGot) {
+        nextInfo = await getDocs(); // Call the getDocs function and store the response in nextInfo
+        nextGot = true;
+      }
+      res.json(nextInfo); // Send the stored response to the client
+    } else {
+      next();
+    }
+  } else {
+    next();
   }
 });
 
 app.listen(PORT, () => {
   console.log(`Proxy server listening on port ${PORT}`);
 });
+
+function shouldTriggerGetDocs(userMessage) {
+  const lowerCaseMessage = userMessage.toLowerCase();
+  return lowerCaseMessage.includes('next.js') || lowerCaseMessage.includes('next js') || lowerCaseMessage.includes('react next') || lowerCaseMessage.includes('next react');
+}
